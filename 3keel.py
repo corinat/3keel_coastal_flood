@@ -14,6 +14,7 @@ from rasterstats import zonal_stats
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import glob
 pd.options.mode.chained_assignment = None
 
 # download UK grid data https://github.com/OrdnanceSurvey/OS-British-National-Grids
@@ -32,11 +33,10 @@ voronoi_data="/Users/corina/3keel_coastal_flood/data/2100_SeaLevelRise&Surge_Vor
 os_bng_grids = "/Users/corina/3keel_coastal_flood/data/os_bng_grids.gpkg"
 
 # out data
-uk_coast_data = '/Users/corina/3keel_coastal_flood/data/filetred_data' # path to filtered OS DEM tiles that interesct the coast line
+uk_coast_data = '/Users/corina/3keel_coastal_flood/data/filetred_data/' # path to filtered OS DEM tiles that interesct the coast line
 slope_data = '/Users/corina/3keel_coastal_flood/data/slope/' # path to filtered slope data
 merged_slope_tiles = '/Users/corina/3keel_coastal_flood/data/merged_slope.tif' # path to slope mosaic
-# filtered_1km_grid="/Users/corina/3keel_coastal_flood/data/filtered_1km_grid.gpkg"
-centroid_stats = "/Users/corina/3keel_coastal_flood/data/centroid.gpkg"
+centroid_stats = "/Users/corina/3keel_coastal_flood/data/centroid_stats.gpkg"
 slope_on_1km_grid = "/Users/corina/3keel_coastal_flood/data/uk_grid_voronoi_slope.gpkg"
 
 
@@ -179,10 +179,7 @@ def get_centroid():
     filtered_1km_grid=filter_1km_grid()
     print('Creating centroids for each 1km grid cell along the UK coast')
     cent = filtered_1km_grid.centroid
-    # print(cent)
     cent.to_file(centroid_stats, driver="GPKG")
-
-# gpd.GeoDataFrame(geometry=gpd.GeoSeries(centriod))
     return cent
 
 
@@ -232,20 +229,26 @@ def attach_slope_value_to_1km_grid():
     slope_1km_uk_grid.to_file(slope_on_1km_grid, driver="GPKG")
 
 def remove_intermediary_data():
-    os.remove()
-    os.remove()
+    """Remove intermediary data
+    """
+    rm_data = [merged_slope_tiles, centroid_stats]
+    for l in glob.glob(f'{uk_coast_data}*', recursive=True):
+        os.remove(l)
+    for f in glob.glob(f'{slope_data}*', recursive=True):
+        os.remove(f)
+    for data in rm_data:
+        os.remove(data)
 
 def main():
     start_time = datetime.now()
-    # unzip_files_along_uk_coast()
-    # create_slope_from_dem()
-    # save_mosaic()
+    unzip_files_along_uk_coast()
+    create_slope_from_dem()
+    save_mosaic()
     get_centroid()
     attach_slope_value_to_1km_grid()
+    remove_intermediary_data()
     end_time = datetime.now()
     print('Duration: {}'.format(end_time - start_time))
-
-
 
 
 if __name__ == "__main__":
