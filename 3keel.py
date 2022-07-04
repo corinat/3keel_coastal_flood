@@ -10,6 +10,11 @@ from os.path import join
 from pathlib import Path
 import rasterio
 from rasterio.merge import merge
+from rasterstats import zonal_stats
+import pandas as pd
+import numpy as np
+from datetime import datetime
+pd.options.mode.chained_assignment = None
 
 # download UK grid data https://github.com/OrdnanceSurvey/OS-British-National-Grids
 # download UK administrative borders, including coast line http://www.diva-gis.org/gdata
@@ -20,24 +25,34 @@ from rasterio.merge import merge
 # The coast line vector data needs to be reprojected to EPSG 27700 and convert to line
 # so that the sjoin method can look only to the cells that intersect the coast line
 
-
 # input data
-os_dem_data = '/Users/corina/3keel/data/terr50_gagg_gb/data' # path to OS DEM data folder
-uk_10_km_grid = "/Users/corina/3keel/data/os_bng_grids_10km_explode.gpkg" # path to exploaded UK 10 km grid
-uk_coast_line = "/Users/corina/3keel/data/GBR_adm0_27700_line.gpkg" # path to UK coast line
+os_dem_data = '/Users/corina/3keel_coastal_flood/data/terr50_gagg_gb/data' # path to OS DEM data folder
+uk_coast_line = "/Users/corina/3keel_coastal_flood/data/GBR_adm0_27700_line.gpkg" # path to UK coast line
+voronoi_data="/Users/corina/3keel_coastal_flood/data/2100_SeaLevelRise&Surge_Voronoi_27700.gpkg"
+os_bng_grids = "/Users/corina/3keel_coastal_flood/data/os_bng_grids.gpkg"
 
 # out data
-uk_coast_data = '/Users/corina/3keel/data/filetred_data' # path to filtered OS DEM tiles that interesct the coast line
-slope_data = '/Users/corina/3keel/data/slope/' # path to output slope data
-merged_slope_tiles = '/Users/corina/3keel/data/merged_slope.tif' # path to slope mosaic
+uk_coast_data = '/Users/corina/3keel_coastal_flood/data/filetred_data' # path to filtered OS DEM tiles that interesct the coast line
+slope_data = '/Users/corina/3keel_coastal_flood/data/slope/' # path to filtered slope data
+merged_slope_tiles = '/Users/corina/3keel_coastal_flood/data/merged_slope.tif' # path to slope mosaic
+# filtered_1km_grid="/Users/corina/3keel_coastal_flood/data/filtered_1km_grid.gpkg"
+centroid_stats = "/Users/corina/3keel_coastal_flood/data/centroid.gpkg"
+slope_on_1km_grid = "/Users/corina/3keel_coastal_flood/data/uk_grid_voronoi_slope.gpkg"
+
+
+def read_uk_grid():
+    """Extracting the 1km and 10km grids from os_bng_grids.gpkg
+    """
+    grid_10k = gpd.read_file(os_bng_grids, layer = '10km_grid')
+    grid_1k = gpd.read_file(os_bng_grids, layer = '1km_grid')
+    return grid_10k, grid_1k
 
 def read_vector_data():
     """Read the grid and the boundaries vector files as geopandas
     """
-    grid = gpd.read_file(uk_10_km_grid)
     coast_line = gpd.read_file(uk_coast_line)
     coast_line = coast_line[['NAME_ISO', 'geometry']]
-    return grid, coast_line
+    return coast_line
 
 
 def get_zipped_files():
@@ -52,10 +67,11 @@ def get_zipped_files():
 def filter_10k_grid():
     """Filter the 10k UK grid to get only the tiles that overlap with the UK coast line
     """
-    grid, coast_line = read_vector_data()
+    coast_line = read_vector_data()
+    _, exploded_grid_10k = explode_grid()
     # gpd.sjoin returns a new GeoDataFrame with the geometries for each object on the left dataframe
     # repeated for each geometry they intersect in the right, with the index of the object in the right
-    intersect_grid_with_line_coast = gpd.sjoin(coast_line, grid, predicate='intersects')
+    intersect_grid_with_line_coast = gpd.sjoin(coast_line, exploded_grid_10k, predicate='intersects')
     remove_duplicates = intersect_grid_with_line_coast.drop_duplicates(subset=['tile_name']) # remove duplicated tile names
     return remove_duplicates[['NAME_ISO', 'tile_name']]
 
@@ -135,10 +151,102 @@ def save_mosaic():
         dest.write(mosaic)
 
 
+def filter_1km_grid():
+    """Getting only the cells from 1 km grid that overlap with the coast line
+    """
+    exploded_grid_1k, _ = explode_grid()
+    coast_line = gpd.read_file(uk_coast_line)
+    intersect_grid_with_line_coast = gpd.sjoin(coast_line, exploded_grid_1k, predicate='intersects') # create a spatial join to get the ikm grid cells that intersect the coast line
+    get_index = intersect_grid_with_line_coast["index1"].tolist() # get the index of the cells that intersect the coast line and save it as a list
+    filt_1km_grid= exploded_grid_1k[exploded_grid_1k['index1'].isin(get_index)] # based on the index list created above get the cells from the exploded 1km grid
+    print("Creating filtered 1km grid along UK coast")
+
+    return filt_1km_grid
+
+
+def explode_grid():
+    """Explode grids to be able to reach each cell inside the grid
+    """
+    grid_10k, grid_1k = read_uk_grid()
+    grid_1k['index1'] = grid_1k.index
+    exploded_grid_1k = grid_1k.explode(index_parts=False) # explode the 1km grid to be able to reach each cell
+    exploded_grid_10k = grid_10k.explode(index_parts=False) # explode the 1km grid to be able to reach each cell
+    return exploded_grid_1k, exploded_grid_10k
+
+def get_centroid():
+    """Getting the centroid for multiple polygons
+    """
+    filtered_1km_grid=filter_1km_grid()
+    print('Creating centroids for each 1km grid cell along the UK coast')
+    cent = filtered_1km_grid.centroid
+    # print(cent)
+    cent.to_file(centroid_stats, driver="GPKG")
+
+# gpd.GeoDataFrame(geometry=gpd.GeoSeries(centriod))
+    return cent
+
+
+def produce_zonal_stats(vector,raster,affine, metrics, nodata):
+    """Producing zonal stats
+    """
+    gdf = gpd.read_file(vector)
+
+    stats = zonal_stats(
+        gdf,
+        raster,
+        affine=affine,
+        stats=metrics,
+        nodata=nodata,
+    )
+    stats = pd.DataFrame(stats)
+    stats = gdf.join(stats, how="left")
+    print("Finished calculating zonal stats")
+    return stats
+
+
+
+def get_stats():
+    """Getting the value of the slope mosaic for each centroid
+    """
+    dem = rasterio.open(merged_slope_tiles)
+    array = dem.read(1)
+    print('Getting the value of the slope where the centroid overlaps the slope mosaic')
+    print('This step takes around 5 minutes to complete')
+    stats = produce_zonal_stats(vector=centroid_stats, raster=array, affine=dem.profile['transform'], metrics='mean', nodata=np.nan)
+    return stats
+
+
+def attach_slope_value_to_1km_grid():
+    """Getting the values from voronoi file  for those cells that intersect with the voronoi
+    polygons and the slope from the centroids and add them to the 1km grid
+    """
+    vornoi=gpd.read_file(voronoi_data)
+    point = get_stats()
+    poly = filter_1km_grid()
+    join_poly_point = poly.sjoin(point, how="left")
+    join_poly_point = join_poly_point.drop(['index_right'], axis=1)
+    join_voronoi_uk_grid = join_poly_point.sjoin(vornoi, how="inner").drop_duplicates(subset=['tile_name'])
+    join_voronoi_uk_grid.rename(columns={"mean": "slope_value"}, inplace=True)
+    slope_1km_uk_grid = join_voronoi_uk_grid[['tile_name','slope_value', 'LT_05_local', 'LT_50_local', 'LT_95_local', 'SWRL_MT', 'slrbLT_50', 'swrl-slr50', 'Add-Swrl5', 'geometry']]
+    print("Create 1km grid with slope values")
+    slope_1km_uk_grid.to_file(slope_on_1km_grid, driver="GPKG")
+
+def remove_intermediary_data():
+    os.remove()
+    os.remove()
+
 def main():
-    unzip_files_along_uk_coast()
-    create_slope_from_dem()
-    save_mosaic()
+    start_time = datetime.now()
+    # unzip_files_along_uk_coast()
+    # create_slope_from_dem()
+    # save_mosaic()
+    get_centroid()
+    attach_slope_value_to_1km_grid()
+    end_time = datetime.now()
+    print('Duration: {}'.format(end_time - start_time))
+
+
+
 
 if __name__ == "__main__":
     main()
