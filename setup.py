@@ -18,4 +18,4 @@ def get_version_from_package() -> str:
 
 
 if __name__ == "__main__":
-    setup(name="convert_arcpy", version=get_version_from_package())
+    setup(name="3keel", version=get_version_from_package())
