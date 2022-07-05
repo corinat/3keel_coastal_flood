@@ -29,7 +29,7 @@ pd.options.mode.chained_assignment = None
 # input data
 os_dem_data = '/Users/corina/3keel_coastal_flood/data/terr50_gagg_gb/data' # path to OS DEM data folder
 uk_coast_line = "/Users/corina/3keel_coastal_flood/data/GBR_adm0_27700_line.gpkg" # path to UK coast line
-voronoi_data="/Users/corina/3keel_coastal_flood/data/2100_SeaLevelRise&Surge_Voronoi_27700.gpkg"
+voronoi_data="/Users/corina/3keel_coastal_flood/data/2100_SeaLevelRise&Surge_Voronoi.gpkg"
 os_bng_grids = "/Users/corina/3keel_coastal_flood/data/os_bng_grids.gpkg"
 
 # out data
@@ -39,6 +39,12 @@ merged_slope_tiles = '/Users/corina/3keel_coastal_flood/data/merged_slope.tif' #
 centroid_stats = "/Users/corina/3keel_coastal_flood/data/centroid_stats.gpkg"
 slope_on_1km_grid = "/Users/corina/3keel_coastal_flood/data/uk_grid_voronoi_slope.gpkg"
 
+def transform_geometries():
+    voronoi = gpd.read_file(voronoi_data)
+    voronoi = voronoi.to_crs(4326)
+    voronoi = voronoi.to_crs(27700)
+    voronoi.to_file("/Users/corina/3keel_coastal_flood/data/2100_SeaLevelRise&Surge_Voronoi_277.gpkg", driver="GPKG")
+    return voronoi
 
 def read_uk_grid():
     """Extracting the 1km and 10km grids from os_bng_grids.gpkg
@@ -179,6 +185,7 @@ def get_centroid():
     filtered_1km_grid=filter_1km_grid()
     print('Creating centroids for each 1km grid cell along the UK coast')
     cent = filtered_1km_grid.centroid
+    # gpd.GeoDataFrame(geometry=gpd.GeoSeries(centriod))
     cent.to_file(centroid_stats, driver="GPKG")
     return cent
 
@@ -241,12 +248,13 @@ def remove_intermediary_data():
 
 def main():
     start_time = datetime.now()
-    unzip_files_along_uk_coast()
-    create_slope_from_dem()
-    save_mosaic()
-    get_centroid()
-    attach_slope_value_to_1km_grid()
-    remove_intermediary_data()
+    transform_geometries()
+    # unzip_files_along_uk_coast()
+    # create_slope_from_dem()
+    # save_mosaic()
+    # get_centroid()
+    # attach_slope_value_to_1km_grid()
+    # remove_intermediary_data()
     end_time = datetime.now()
     print('Duration: {}'.format(end_time - start_time))
 
